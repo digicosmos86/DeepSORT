@@ -15,6 +15,8 @@ from tensorflow.keras.initializers import (
 from tensorflow.keras.regularizers import L2
 from tensorflow.keras.activations import elu
 
+L2_reg_strength = 1e-8
+
 
 class ResidualBlock(Layer):
     def __init__(self, n, is_first=False, increase_dim=False, **kwargs):
@@ -26,7 +28,7 @@ class ResidualBlock(Layer):
         self.is_first = is_first
 
         weight_init = TruncatedNormal(stddev=1e-3)
-        weight_regularizer = L2(1e-8)
+        weight_regularizer = L2(L2_reg_strength)
         bias_init = Zeros()
 
         if not self.is_first:
@@ -56,6 +58,17 @@ class ResidualBlock(Layer):
             kernel_regularizer=weight_regularizer,
         )
 
+        self.projection = Conv2D(
+            filters=self.n,
+            kernel_size=(1, 1),
+            strides=(2, 2),
+            padding="same",
+            activation=None,
+            kernel_initializer=weight_init,
+            bias_initializer=bias_init,
+            kernel_regularizer=weight_regularizer,
+        )
+
     def call(self, x):
 
         if self.is_first:
@@ -73,20 +86,45 @@ class ResidualBlock(Layer):
 
         if pre_block_dim != post_block_dim:
             assert post_block_dim == pre_block_dim * 2
-            self.projection = Conv2D(
-                filters=post_block_dim,
-                kernel_size=(1, 1),
-                strides=(2, 2),
-                padding="same",
-                activation=None,
-                kernel_initializer=TruncatedNormal(stddev=1e-3),
-                bias_initializer=Zeros(),
-                kernel_regularizer=L2(1e-8),
-            )
 
             x = self.projection(x)
 
         return x + x1
+
+
+class CosineSimilarity(Layer):
+    def __init__(self, units, **kwargs):
+        super(CosineSimilarity, self).__init__(**kwargs)
+
+        self.units = units
+
+    def build(self, input_shape):
+
+        w_init = TruncatedNormal(1e-3)
+        self.layer_weights = tf.Variable(
+            initial_value=w_init(
+                shape=(input_shape[-1], self.units),
+                dtype=tf.float32,
+            ),
+            trainable=True,
+            name="my_weights",
+        )
+
+        scale_init = tf.constant_initializer(0.1)
+        self.scale = tf.Variable(
+            initial_value=scale_init(shape=(1)),
+            trainable=True,
+            name="k",
+        )
+
+        self.regularizer = L2(1e-1)
+
+    def call(self, x):
+        scale = tf.nn.softplus(self.regularizer(self.scale))
+        weights_norm = tf.nn.l2_normalize(self.layer_weights, axis=0)
+        logits = scale * tf.matmul(x, weights_norm)
+
+        return logits
 
 
 class DeepAppearanceDescriptor(tf.keras.models.Model):
@@ -95,7 +133,7 @@ class DeepAppearanceDescriptor(tf.keras.models.Model):
         super(DeepAppearanceDescriptor, self).__init__()
 
         weight_init = TruncatedNormal(stddev=1e-3)
-        weight_regularizer = L2(1e-8)
+        weight_regularizer = L2(L2_reg_strength)
         bias_init = Zeros()
 
         self.conv1 = Conv2D(
@@ -132,7 +170,7 @@ class DeepAppearanceDescriptor(tf.keras.models.Model):
         self.residual_block6 = ResidualBlock(n=128)
 
         self.flatten = Flatten()
-        self.dropout = Dropout(0.6)
+        self.dropout1 = Dropout(0.6)
         self.dense = Dense(
             128,
             activation="elu",
@@ -141,41 +179,65 @@ class DeepAppearanceDescriptor(tf.keras.models.Model):
             kernel_regularizer=weight_regularizer,
         )
         self.batch_norm3 = BatchNormalization()
+        self.classifier = CosineSimilarity(units=1502, name="classification_layer")
 
-    def call(self, inputs):
+    def call(self, inputs, train=True):
 
         x = self.conv1(inputs)
         x = self.batch_norm1(x)
         x = self.conv2(x)
         x = self.batch_norm2(x)
         x = self.maxpool1(x)
-        print(x.shape)
         x = self.residual_block1(x)
-        print(x.shape)
         x = self.residual_block2(x)
-        print(x.shape)
         x = self.residual_block3(x)
-        print(x.shape)
         x = self.residual_block4(x)
-        print(x.shape)
         x = self.residual_block5(x)
-        print(x.shape)
         x = self.residual_block6(x)
-        print(x.shape)
         x = self.flatten(x)
-        x = self.dropout(x)
+        x = self.dropout1(x)
         x = self.dense(x)
         x = self.batch_norm3(x)
         x = tf.nn.l2_normalize(x, axis=1)
 
+        if not train:
+            return x
+
+        x = self.classifier(x)
         return x
+
+    @tf.function
+    def train_step(self, data):
+
+        images, labels = data
+
+        with tf.GradientTape() as tape:
+            outputs = self(images, train=True)
+            loss = self.compiled_loss(labels, outputs)
+
+        gradients = tape.gradient(loss, self.trainable_variables)
+        self.optimizer.apply_gradients(zip(gradients, self.trainable_variables))
+
+        self.compiled_metrics.update_state(labels, outputs)
+
+        return {m.name: m.result() for m in self.metrics}
+
+    @tf.function
+    def test_step(self, data):
+
+        images, labels = data
+        outputs = self(images, train=True)
+        self.compiled_loss(labels, outputs)
+
+        self.compiled_metrics.update_state(labels, outputs)
+        return {m.name: m.result() for m in self.metrics}
 
 
 if __name__ == "__main__":
     import numpy as np
 
     model = DeepAppearanceDescriptor()
-    model.build((1, 128, 64, 3))
+    model(tf.keras.Input(shape=(64, 128, 3)))
     model.summary()
 
     x = np.random.randn(1, 128, 64, 3)

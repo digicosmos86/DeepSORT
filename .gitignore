@@ -127,3 +127,12 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+deepsort/data
+deepsort/data/*
+
+deepsort/deep/checkpoints
+deepsort/deep/checkpoints/*
+
+deepsort/deep/logs
+deepsort/deep/logs/*
