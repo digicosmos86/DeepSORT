@@ -13,4 +13,9 @@ wget https://pjreddie.com/media/files/yolov3.weights
 wget https://pjreddie.com/media/files/yolov3-tiny.weights
 ```
 Move these `.weight` files into the `data` folder. 
-Then, proceed 
+
+
+There are ways that we have reviewed that would have allowed for the creation of masks that will count the number of objects.
+The ideal version would have been to utilize a webcam, but we soon realized that this proved incredibly difficult as the mask had to be formed prior, and a slight motion in the camera would have immediately altered the mask. Most of this, therefore, happens in the post-processing stage.
+Additionally, the training process itself requires some level of pre-training data. 
+Hence, we should have been extremely selective in our specification for object counting.
