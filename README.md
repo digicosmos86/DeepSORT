@@ -12,3 +12,5 @@ wget https://pjreddie.com/media/files/yolov3.weights
 # for YOLOv3-Tiny weights
 wget https://pjreddie.com/media/files/yolov3-tiny.weights
 ```
+Move these `.weight` files into the `data` folder. 
+Then, proceed 
