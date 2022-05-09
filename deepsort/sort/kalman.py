@@ -1,4 +1,5 @@
 import numpy as np
+import scipy.linalg
 
 class KalmanFilter(object):
     """
@@ -123,3 +124,37 @@ class KalmanFilter(object):
         P_new = np.dot(np.dot(I_KH, P_pred), I_KH.T) + np.dot(np.dot(K, self.R), K.T)
 
         return x_new, P_new
+    
+    def gating_distance(self, mean, covariance, measurements, only_position = False):
+        """
+        Compute gating distance between state distribution and measurements.
+        A suitable distance threshold can be obtained from `chi2inv95`.
+        If `only_position` is False, the chi-square distribution has 4 degrees of freedom, otherwise 2.
+        """
+        mean, covariance = self.project(mean, covariance)
+        if only_position:
+            mean, covariance = mean[:2], covariance[:2, :2]
+            measurements = measurements[:, :2]
+        
+        cho_factor = np.linalg.cholesky(covariance)
+        d = measurements - mean
+        z = scipy.linalg.solve_triangular(
+            cho_factor, d.T, lower=True, check_finite=False, overwrite_b=True
+        )
+        squared_mahalanobis = np.sum(z * z, axis=0)
+        return squared_mahalanobis
+
+
+
+# inclusion of standard gating thresholds.
+chi2inv95 = {
+    1: 3.8415,
+    2: 5.9915,
+    3: 7.8147,
+    4: 9.4877,
+    5: 11.070,
+    6: 12.592,
+    7: 14.067,
+    8: 15.507,
+    9: 16.919}
+
