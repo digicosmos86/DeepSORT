@@ -18,6 +18,7 @@ def iou(bbox_true, bbox_pred):
     union = bbox_true[2:].prod(axis=1) + bbox_pred[:, 2:].prod(axis=1)
     return intersection / (union - intersection)
 
+
 def iou_cost(tracks, detections, track_indices=None, detection_indices=None):
     if track_indices is None:
         track_indices = np.arange(len(tracks))
