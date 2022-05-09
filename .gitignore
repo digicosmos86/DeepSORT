@@ -136,3 +136,6 @@ deepsort/deep/checkpoints/*
 
 deepsort/deep/logs
 deepsort/deep/logs/*
+
+yolov4-416
+yolov4-416/*
