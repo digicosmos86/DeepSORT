@@ -15,54 +15,11 @@
 #     * **tlbr_to_center**: convert bounding box in tlbr format to center format
 #     * **center_to_tlbr**: convert bounding box in center format to tlbr format
 
+import cv2
 import numpy as np
+import tensorflow as tf
 
-
-def tlbr_to_xywh(tlbr):
-    """
-    convert tlbr format to xywh format
-    """
-    xy_min = tlbr[:, [1, 0]]
-    xy_max = tlbr[:, [3, 2]]
-    wh = xy_max - xy_min
-    xy = (xy_min + xy_max) / 2
-    xywh = np.concatenate([xy, wh], axis=1)
-    return xywh
-
-
-def xywh_to_tlbr(xywh):
-    """
-    convert xywh format to tlbr format
-    """
-    xy_min = xywh[:, [0, 1]] - xywh[:, [2, 3]] / 2
-    xy_max = xywh[:, [0, 1]] + xywh[:, [2, 3]] / 2
-    tlbr = np.concatenate([xy_min, xy_max], axis=1)
-
-    return tlbr
-
-
-def xywh_to_center(xywh):
-    """
-    convert xywh format to center format
-    """
-    xy_min = xywh[:, [0, 1]] - xywh[:, [2, 3]] / 2
-    xy_max = xywh[:, [0, 1]] + xywh[:, [2, 3]] / 2
-    xy = (xy_min + xy_max) / 2
-    wh = xy_max - xy_min
-    center = np.concatenate([xy, wh], axis=1)
-
-    return center
-
-
-def tlbr_to_xyxy(tlbr):
-    """
-    convert tlbr format to xyxy format
-    """
-    xy_min = tlbr[:, [1, 0]]
-    xy_max = tlbr[:, [3, 2]]
-    xyxy = np.concatenate([xy_min, xy_max], axis=1)
-
-    return xyxy
+from .detect import Detection
 
 
 def scale_bbox_to_original(bboxes, original_hw):
@@ -79,85 +36,65 @@ def scale_bbox_to_original(bboxes, original_hw):
     return np.round(bboxes).astype(np.int32)
 
 
-coco_names = [
-    "person",
-    "bicycle",
-    "car",
-    "motorbike",
-    "aeroplane",
-    "bus",
-    "train",
-    "truck",
-    "boat",
-    "traffic light",
-    "fire hydrant",
-    "stop sign",
-    "parking meter",
-    "bench",
-    "bird",
-    "cat",
-    "dog",
-    "horse",
-    "sheep",
-    "cow",
-    "elephant",
-    "bear",
-    "zebra",
-    "giraffe",
-    "backpack",
-    "umbrella",
-    "handbag",
-    "tie",
-    "suitcase",
-    "frisbee",
-    "skis",
-    "snowboard",
-    "sports ball",
-    "kite",
-    "baseball bat",
-    "baseball glove",
-    "skateboard",
-    "surfboard",
-    "tennis racket",
-    "bottle",
-    "wine glass",
-    "cup",
-    "fork",
-    "knife",
-    "spoon",
-    "bowl",
-    "banana",
-    "apple",
-    "sandwich",
-    "orange",
-    "broccoli",
-    "carrot",
-    "hot dog",
-    "pizza",
-    "donut",
-    "cake",
-    "chair",
-    "sofa",
-    "potted plant",
-    "bed",
-    "dining table",
-    "toilet",
-    "tvmonitor",
-    "laptop",
-    "mouse",
-    "remote",
-    "keyboard",
-    "cell phone",
-    "microwave",
-    "oven",
-    "toaster",
-    "sink",
-    "refrigerator",
-    "book",
-    "clock",
-    "vase",
-    "scissors",
-    "teddy bear",
-    "hair drier",
-    "toothbrush",
-]
+def to_detections(image, bboxes, model):
+    """Convert bboxes to detections.
+
+    Args:
+        image (numpy.ndarray): Image.
+        bboxes (numpy.ndarray): nx4 array of bboxes.
+        model (tf.keras.models.Model): the deep appearance descriptor model
+    """
+
+    # Convert bboxes to detections.
+    if bboxes.shape[0] == 0:
+        return []
+    detections = []
+
+    patches = []
+
+    for bbox in bboxes:
+
+        x1, y1, x2, y2 = bbox.astype(np.int32)
+        # Get the patch.
+        patch = image[y1:y2, x1:x2]
+        # Resize the patch to the model input size.
+        patch = cv2.resize(patch, (64, 128))
+        # Add the patch to the list of patches.
+        patches.append(patch)
+
+    # Get the deep appearance descriptor for the patches.
+    patches = tf.convert_to_tensor(patches, dtype=tf.float32) / 255.0
+    descriptors = model(patches).numpy()
+
+    for bbox, descriptor in zip(bboxes, descriptors):
+        # Create a detection.
+        detection = Detection(bbox, descriptor)
+        # Add the detection to the list of detections.
+        detections.append(detection)
+
+    return detections
+
+
+def draw_track(image, track):
+    """Draw bboxes on image.
+
+    Args:
+        image (numpy.ndarray): Image.
+        bboxes (numpy.ndarray): length-4 array of bbox.
+        name (str): name of the bbox.
+    """
+
+    # Draw bboxes on image.
+    x1, y1, x2, y2 = track.to_tlbr().astype(np.int32)
+
+    image = cv2.rectangle(image, (x1, y1), (x2, y2), track.color, 2)
+    image = cv2.rectangle(
+        image,
+        (x1, y1 - 30),
+        (x2 + (len(track.name) + len(str(track.id))) * 17, y1),
+        track.color,
+        -1,
+    )
+    cv2.putText(image, track.name, (int(x1), int(y1 - 10)), 0, 0.75, (255, 255, 255), 2)
+
+    return image

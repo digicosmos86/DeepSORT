@@ -1,20 +1,12 @@
 import numpy as np
+import scipy.linalg
+
 
 class KalmanFilter(object):
     """
     Simple implementation of a Kalman filter
-
     input dimensions:
-    u, v, h, r, x, y, vh, vr
-
-    u: x coordinate of the center of the bounding box
-    v: y coordinate of the center of the bounding box
-    h: height of the bounding box
-    r: aspect ration (w/h) of the bounding box
-    x: x coordinate of the center of the bounding box
-    y: y coordinate of the center of the bounding box
-    vh: velocity of the height of the bounding box
-    vr: velocity of the aspect ratio of the bounding box
+    x, y, a, h, vx, vy, va, vh
     """
 
     def __init__(self):
@@ -41,10 +33,9 @@ class KalmanFilter(object):
     def initial_state(self, init_measurement):
         """
         Initialize the state from a new, untracked measurement.
-
         Args:
             measurement: a 1d ndarray of length 4, each element indicates:
-                x, y, h, r
+                x, y, a, h
         """
         state = np.array(init_measurement)
         velocity = np.zeros(4)
@@ -53,14 +44,14 @@ class KalmanFilter(object):
         # Use relative location as to determine the standard deviations.
         P_stds = np.array(
             [
-                2 * self._std_weight_position * init_measurement[0],  # x
-                2 * self._std_weight_position * init_measurement[1],  # y
-                2 * self._std_weight_position * init_measurement[2],  # height
-                1 * init_measurement[3],  # aspect ratio
-                10 * self._std_weight_velocity * init_measurement[0],  # x velocity
-                10 * self._std_weight_velocity * init_measurement[1],  # y velocity
-                10 * self._std_weight_velocity * init_measurement[2],  # height velocity
-                10 * init_measurement[3],  # aspect ratio velocity
+                2 * self._std_weight_position * init_measurement[3],  # x
+                2 * self._std_weight_position * init_measurement[3],  # y
+                1e-2,  # aspect ratio
+                2 * self._std_weight_position * init_measurement[3],  # height
+                10 * self._std_weight_velocity * init_measurement[3],  # x velocity
+                10 * self._std_weight_velocity * init_measurement[3],  # y velocity
+                1e-5,  # aspect ratio velocity
+                10 * self._std_weight_velocity * init_measurement[3],  # height velocity
             ]
         )
 
@@ -74,14 +65,14 @@ class KalmanFilter(object):
         """
         Q_stds = np.array(
             [
-                self._std_weight_position * x[0],  # x
-                self._std_weight_position * x[1],  # y
-                self._std_weight_position * x[2],  # height
-                1 * x[3],  # aspect ratio
-                self._std_weight_velocity * x[0],  # x velocity
-                self._std_weight_velocity * x[1],  # y velocity
-                self._std_weight_velocity * x[2],  # height velocity
-                1 * x[3],  # aspect ratio velocity
+                self._std_weight_position * x[3],  # x
+                self._std_weight_position * x[3],  # y
+                1e-2,  # aspect ratio
+                self._std_weight_position * x[3],  # height
+                self._std_weight_velocity * x[3],  # x velocity
+                self._std_weight_velocity * x[3],  # y velocity
+                1e-5,  # aspect ratio velocity
+                self._std_weight_velocity * x[3],  # height velocity
             ]
         )
 
@@ -92,18 +83,19 @@ class KalmanFilter(object):
 
         return x_pred, P_pred
 
-    def innovation(self, x_pred, P_pred, z):
+
+    def project(self, x_pred, P_pred):
         """
         Performs the innovation step of the Kalman filter
         """
-        nu = z - np.dot(self.H, x_pred)
+        nu = np.dot(self.H, x_pred)
 
         R_stds = np.array(
             [
                 self._std_weight_position * x_pred[0],  # x
                 self._std_weight_position * x_pred[1],  # y
-                self._std_weight_position * x_pred[2],  # height
-                0.1 * x_pred[3],  # aspect ratio
+                1e-1,  # aspect ratio
+                self._std_weight_position * x_pred[3],  # height
             ]
         )
         R = np.diag(R_stds**2)
@@ -116,10 +108,49 @@ class KalmanFilter(object):
         """
         Perform the update step of the Kalman filter.
         """
-        nu, S = self.innovation(x_pred, P_pred, z)
-        K = np.dot(P_pred, self.H.T).dot(np.linalg.inv(S))
-        x_new = x_pred + np.dot(K, nu)
-        I_KH = np.eye(self.dim) - np.dot(K, self.H)
-        P_new = np.dot(np.dot(I_KH, P_pred), I_KH.T) + np.dot(np.dot(K, self.R), K.T)
+        projected_mean, projected_cov = self.project(x_pred, P_pred)
 
-        return x_new, P_new
+        chol_factor, lower = scipy.linalg.cho_factor(
+            projected_cov, lower=True, check_finite=False)
+        kalman_gain = scipy.linalg.cho_solve(
+            (chol_factor, lower), np.dot(P_pred, self.H.T).T,
+            check_finite=False).T
+        innovation = z - projected_mean
+
+        x_pred_new = x_pred + np.dot(innovation, kalman_gain.T)
+        P_pred_new = P_pred - np.linalg.multi_dot((
+            kalman_gain, projected_cov, kalman_gain.T))
+        return x_pred_new, P_pred_new
+
+    def gating_distance(self, mean, covariance, measurements, only_position=False):
+        """
+        Compute gating distance between state distribution and measurements.
+        A suitable distance threshold can be obtained from `chi2inv95`.
+        If `only_position` is False, the chi-square distribution has 4 degrees of freedom, otherwise 2.
+        """
+        mean, covariance = self.project(mean, covariance)
+        if only_position:
+            mean, covariance = mean[:2], covariance[:2, :2]
+            measurements = measurements[:, :2]
+
+        cho_factor = np.linalg.cholesky(covariance)
+        d = measurements - mean
+        z = scipy.linalg.solve_triangular(
+            cho_factor, d.T, lower=True, check_finite=False, overwrite_b=True
+        )
+        squared_mahalanobis = np.sum(z * z, axis=0)
+        return squared_mahalanobis
+
+
+# inclusion of standard gating thresholds.
+chi2inv95 = {
+    1: 3.8415,
+    2: 5.9915,
+    3: 7.8147,
+    4: 9.4877,
+    5: 11.070,
+    6: 12.592,
+    7: 14.067,
+    8: 15.507,
+    9: 16.919,
+}

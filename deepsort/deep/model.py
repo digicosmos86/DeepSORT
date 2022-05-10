@@ -239,7 +239,3 @@ if __name__ == "__main__":
     model = DeepAppearanceDescriptor()
     model(tf.keras.Input(shape=(64, 128, 3)))
     model.summary()
-
-    x = np.random.randn(1, 128, 64, 3)
-    y = model(x)
-    print(y.shape)
