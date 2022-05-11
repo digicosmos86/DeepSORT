@@ -57,14 +57,20 @@ def to_detections(image, bboxes, model):
         x1, y1, x2, y2 = bbox.astype(np.int32)
         # Get the patch.
         patch = image[y1:y2, x1:x2]
+        if patch.size == 0:
+            continue
         # Resize the patch to the model input size.
         patch = cv2.resize(patch, (64, 128))
         # Add the patch to the list of patches.
         patches.append(patch)
 
+
+    if len(patches) == 0:
+        return patches
+
     # Get the deep appearance descriptor for the patches.
     patches = tf.convert_to_tensor(patches, dtype=tf.float32) / 255.0
-    descriptors = model(patches).numpy()
+    descriptors = model(patches, train=False).numpy()
 
     for bbox, descriptor in zip(bboxes, descriptors):
         # Create a detection.

@@ -122,7 +122,7 @@ def main(_argv):
 
         # Draw tracker
         for track in tracker.tracks:
-            if not track.is_tracked() or track.time_since_update > 1:
+            if not track.is_tracked():
                 continue
 
             frame = draw_track(frame, track)
@@ -139,7 +139,7 @@ def main(_argv):
         if cv2.waitKey(1) & 0xFF == 27:
             break
 
-        time.sleep(1000 // 30 / 1000)
+        # time.sleep(1000 // 30 / 1000)
 
     # Release resources
     video.release()

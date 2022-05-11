@@ -7,7 +7,7 @@ class Metric(object):
     Computes distance metrics and keeps track of features
     """
 
-    def __init__(self, matching_threshold=0.5, budget=5):
+    def __init__(self, matching_threshold=0.5, budget=100):
 
         self.matching_threshold = matching_threshold
         self.budget = budget
